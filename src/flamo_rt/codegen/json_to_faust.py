@@ -95,25 +95,6 @@ def _emit_diagonal_gain(node: dict[str, Any]) -> str:
     return "(" + " , ".join(channels) + ")"
 
 
-def _emit_matrix_gain(node: dict[str, Any]) -> str:
-    """dense mixing matrix: sum-of-products per output channel.
-
-    for an NxM matrix A, output channel i = sum_j(A[i][j] * input_j).
-    in faust this is expressed as a function taking M inputs and
-    producing N outputs using the si.bus routing.
-
-    the matrix is emitted as a named local expression that takes
-    n_in signal arguments and produces n_out signals.
-    """
-    matrix = node["params"]["matrix"]
-    n_out = len(matrix)
-    n_in = len(matrix[0])
-
-    args = ", ".join(f"x{j}" for j in range(n_in))
-    rows = [_build_matrix_row(matrix[i], n_in) for i in range(n_out)]
-    body = " , ".join(rows)
-    return f"si.bus({n_in}) : _,_ -> ({args}) {{ {body} }}"
-
 
 def _emit_matrix_as_function(node: dict[str, Any]) -> tuple[str, str]:
     """emit a matrix as a separate faust function definition.
@@ -190,6 +171,39 @@ def _safe_name(name: str) -> str:
     return "".join(result) or "_unnamed"
 
 
+#channel count inference for recursion routing
+
+def _get_channel_count(node: dict[str, Any] | None) -> int | None:
+    """infer the output channel count from a json config node.
+
+    checks output_channels on leaf nodes, and recurses into
+    container nodes to find a leaf with channel information.
+    """
+    if node is None:
+        return None
+    #leaf nodes carry channel counts directly
+    out_ch = node.get("output_channels")
+    if out_ch is not None:
+        return int(out_ch)
+    #for matrices, infer from params
+    params = node.get("params", {})
+    if "matrix" in params:
+        return len(params["matrix"])
+    if "gains" in params:
+        return len(params["gains"])
+    if "samples" in params:
+        return len(params["samples"])
+    #for container nodes, check children or fF/fB
+    children = node.get("children", [])
+    if children:
+        #last child's output is the container's output
+        return _get_channel_count(children[-1])
+    ff = node.get("fF")
+    if ff is not None:
+        return _get_channel_count(ff)
+    return None
+
+
 #recursive code generation from the json config tree
 
 class _FaustEmitter:
@@ -254,12 +268,30 @@ class _FaustEmitter:
         return f"({parallel_expr})"
 
     def _emit_recursion(self, node: dict[str, Any]) -> str:
-        """recursion (feedback): fF ~ fB"""
+        """recursion (feedback): (par(i,N,+) : fF) ~ fB
+
+        faust's ~ operator feeds fB's outputs back to fF's first inputs.
+        if fF and fB have the same channel count, all fF inputs are consumed
+        by feedback leaving no external inputs. the fdn needs external inputs
+        to enter the loop, so we prepend par(i,N,+) to fF. this creates N
+        additional inputs that get summed with the N feedback signals.
+        """
         ff_node = node.get("fF")
         fb_node = node.get("fB")
 
         ff_expr = self.emit(ff_node) if ff_node else "_"
         fb_expr = self.emit(fb_node) if fb_node else "_"
+
+        #determine the feedback channel count from fB's output or fF's input
+        n_fb = _get_channel_count(fb_node)
+
+        if n_fb is not None and n_fb > 0:
+            #prepend adders so external inputs can enter the feedback loop
+            if n_fb == 1:
+                adders = "+"
+            else:
+                adders = f"par(i, {n_fb}, +)"
+            return f"(({adders} : {ff_expr}) ~ {fb_expr})"
 
         return f"({ff_expr} ~ {fb_expr})"
 

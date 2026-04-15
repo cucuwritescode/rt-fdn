@@ -146,18 +146,18 @@ def _normalise_sos(sos: np.ndarray) -> list:
 def _classify_gain(param: np.ndarray) -> str:
     """determine whether a gain parameter represents a matrix or diagonal gains.
 
-    returns "matrix" if param is 2d with both dimensions > 1,
-    "diagonal" if param is 1d or one dimension is 1.
+    returns "matrix" for any 2d param that mixes or routes channels
+    (including row vectors N to 1 and column vectors 1 to N).
+    returns "diagonal" for 1d params and scalar (1,1) gains.
     """
     if param.ndim == 1:
         return "diagonal"
     if param.ndim == 2:
         n_out, n_in = param.shape
-        if n_out == 1 or n_in == 1:
-            #single row or column, effectively a vector
+        if n_out == 1 and n_in == 1:
+            #scalar gain, no routing needed
             return "diagonal"
         return "matrix"
-    #higher rank, treat as matrix
     return "matrix"
 
 
