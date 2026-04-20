@@ -138,5 +138,5 @@ tests/
 
 MIT — see [LICENSE](LICENSE) for details.
 
-**Author:** Facundo Franchino
+
 
