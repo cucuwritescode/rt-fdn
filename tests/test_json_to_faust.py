@@ -261,6 +261,52 @@ class TestComposition:
         assert "@(999)" in code
         assert "*(0.5)" in code
 
+    def test_recursion_multichannel_interleave(self):
+        #regression test for the N>1 routing bug.
+        #without ro.interleave, par(i,N,+) receives feedback signals
+        #in the wrong slots: the ~ operator delivers feedback to the
+        #first N inputs contiguously, but par(i,N,+) expects pairs
+        #(fb0,ext0, fb1,ext1, ...). interleaving is required so each
+        #adder sums one feedback signal with one external signal.
+        delay = _leaf("d", "parallelDelay",
+                       {"samples": [1103, 1447, 1811, 2137]})
+        matrix = [
+            [0.5,  0.5,  0.5,  0.5],
+            [0.5, -0.5,  0.5, -0.5],
+            [0.5,  0.5, -0.5, -0.5],
+            [0.5, -0.5, -0.5,  0.5],
+        ]
+        fb = _leaf("fB", "Gain", {"matrix": matrix})
+        rec = {
+            "type": "Recursion",
+            "name": "loop",
+            "fF": delay,
+            "fB": fb,
+        }
+        config = _wrap_config(rec)
+        code = json_to_faust(config)
+        #must interleave before the adders for correct routing
+        assert "ro.interleave(4, 2)" in code
+        assert "par(i, 4, +)" in code
+        #interleave must come before the adders in the chain
+        assert "ro.interleave(4, 2) : par(i, 4, +)" in code
+
+    def test_recursion_single_channel_no_interleave(self):
+        #N=1 uses a bare + (two inputs: one feedback, one external).
+        #no interleave is needed because the routing is already correct.
+        delay = _leaf("d", "parallelDelay", {"samples": [500]}, n_ch=1)
+        gain = _leaf("g", "parallelGain", {"gains": [0.7]}, n_ch=1)
+        rec = {
+            "type": "Recursion",
+            "name": "loop",
+            "fF": delay,
+            "fB": gain,
+        }
+        config = _wrap_config(rec)
+        code = json_to_faust(config)
+        assert "ro.interleave" not in code
+        assert "+ :" in code
+
     def test_shell_unwraps(self):
         gain = _leaf("g", "parallelGain", {"gains": [0.8]}, n_ch=1)
         shell = {
