@@ -1,8 +1,8 @@
 <div align="center">
 
-# flamo_rt
+# rt-fdn
 
-**real-time deployment of FLAMO audio graphs via FAUST**
+**real-time deployment of differentiable audio graphs via FAUST**
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
